@@ -149,8 +149,11 @@ class DocumentLoader:
         return default
 
     def _extract_title_from_text(self, content: str, default: str) -> str:
-        """Heuristically finds the first non-empty line as a title candidate."""
-        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        """Heuristically finds the first non-empty substantive line as a title candidate."""
+        lines = [
+            line.strip() for line in content.splitlines()
+            if line.strip() and not re.match(r'^\[Page\s+\d+\]', line.strip(), re.IGNORECASE)
+        ]
         if lines and len(lines[0]) < 120:
             return lines[0].lstrip('#').strip()
         return default
