@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VeriCite AI | Research Agent with Citations</title>
+  <meta name="description" content="Citation-Grounded Research AI Agent with Hybrid BM25/Dense Retrieval, Claim-Level Verification, and Anti-Hallucination Guardrails.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Navigation Header -->
+    <header class="top-nav" id="top-nav">
+      <div class="nav-brand">
+        <div class="logo-mark">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            <path d="m9 9 2 2 4-4"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">VeriCite AI</span>
+          <span class="brand-tag">Research Agent</span>
+        </div>
+      </div>
+
+      <nav class="nav-tabs" id="nav-tabs" role="tablist">
+        <button class="nav-tab active" id="tab-btn-research" data-tab="tab-research" role="tab" aria-selected="true">
+          <span>Research Lab</span>
+        </button>
+        <button class="nav-tab" id="tab-btn-corpus" data-tab="tab-corpus" role="tab" aria-selected="false">
+          <span>Source Corpus</span>
+          <span class="badge-count" id="header-doc-count">8</span>
+        </button>
+        <button class="nav-tab" id="tab-btn-benchmark" data-tab="tab-benchmark" role="tab" aria-selected="false">
+          <span>Benchmark Suite</span>
+        </button>
+        <button class="nav-tab" id="tab-btn-architecture" data-tab="tab-architecture" role="tab" aria-selected="false">
+          <span>Architecture & Logic</span>
+        </button>
+      </nav>
+
+      <div class="nav-actions">
+        <div class="provider-pill" id="header-provider-badge">
+          <span class="status-dot online"></span>
+          <span id="provider-name-display">Loading...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-viewport">
+      
+      <!-- ==================== TAB 1: RESEARCH LAB ==================== -->
+      <section class="tab-pane active" id="tab-research" role="tabpanel">
+        <div class="research-grid">
+          
+          <!-- Left Column: Query Console -->
+          <div class="query-column">
+            <div class="card query-card">
+              <div class="card-header">
+                <h2>Research Inquiry</h2>
+                <span class="card-subtitle">Submit technical or scientific queries for citation-grounded synthesis</span>
+              </div>
+
+              <form id="research-form" class="research-form">
+                <div class="form-group">
+                  <label for="query-input" class="form-label">Research Question or Topic</label>
+                  <textarea 
+                    id="query-input" 
+                    name="query" 
+                    rows="3" 
+                    class="form-textarea" 
+                    placeholder="e.g., How does FlashAttention-2 optimize GPU memory bandwidth, and what speedup does it achieve?"
+                    required
+                  ></textarea>
+                </div>
+
+                <!-- Preset Example Queries -->
+                <div class="presets-section">
+                  <span class="presets-label">Sample Test Cases:</span>
+                  <div class="presets-pills" id="presets-container">
+                    <button type="button" class="preset-pill" data-query="How does FlashAttention-2 achieve GPU memory speedups, and what is its performance improvement on NVIDIA H100 GPUs?">Frontier AI / FlashAttention-2</button>
+                    <button type="button" class="preset-pill" data-query="Compare the thermodynamic regeneration temperatures and energy demands of solid sorbent versus liquid solvent Direct Air Capture (DAC) systems.">Climate DAC Comparison</button>
+                    <button type="button" class="preset-pill" data-query="How do topological and fault-tolerant quantum computers threaten classic public-key cryptography, and which NIST post-quantum standards are ratified to replace them?">Quantum vs Post-Quantum (Multi-Doc)</button>
+                    <button type="button" class="preset-pill" data-query="What are the key mechanistic differences between Cytidine Base Editors (CBE) and Search-and-Replace Prime Editing systems?">CRISPR Base vs Prime</button>
+                    <button type="button" class="preset-pill unanswerable-pill" data-query="What are the latest warp-bubble metric tensors and antimatter injection ratios for the Alcubierre interstellar drive in 2026?">Out-of-Corpus Fallback Test</button>
+                  </div>
+                </div>
+
+                <!-- Advanced Parameters Accordion -->
+                <details class="advanced-params">
+                  <summary>Retrieval Parameters</summary>
+                  <div class="params-grid">
+                    <div class="param-field">
+                      <label for="top-k-select">Top-K Passages: <span id="top-k-val">5</span></label>
+                      <input type="range" id="top-k-select" min="2" max="10" value="5" step="1">
+                    </div>
+                    <div class="param-field checkbox-field">
+                      <label>
+                        <input type="checkbox" id="strict-citations-toggle" checked>
+                        <span>Strict Claim Grounding Guardrail</span>
+                      </label>
+                    </div>
+                  </div>
+                </details>
+
+                <div class="form-actions">
+                  <button type="submit" class="btn btn-primary" id="btn-submit-query">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <span>Execute Agentic Research</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <!-- Live Multi-Step Execution Stepper -->
+            <div class="card stepper-card" id="stepper-card" style="display: none;">
+              <div class="card-header">
+                <h3>Agent Reasoning Trace</h3>
+                <span class="exec-timer" id="exec-total-timer">0.0ms</span>
+              </div>
+              <div class="stepper-timeline" id="stepper-timeline">
+                <!-- Dynamically populated execution steps -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Synthesis & Evidence Inspector -->
+          <div class="results-column">
+            
+            <!-- Result Summary Card -->
+            <div class="card result-card" id="result-card">
+              <div class="result-placeholder" id="result-placeholder">
+                <div class="placeholder-icon">
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                  </svg>
+                </div>
+                <h3>Awaiting Research Query</h3>
+                <p>Select a sample test question on the left or enter a custom technical query to synthesize verified findings.</p>
+              </div>
+
+              <!-- Active Result Container -->
+              <div class="result-content-container" id="result-content-container" style="display: none;">
+                
+                <!-- Status & Confidence Banner -->
+                <div class="result-banner" id="result-banner">
+                  <div class="banner-left">
+                    <div class="status-tag" id="result-status-tag">Verified Grounded</div>
+                    <div class="confidence-meter">
+                      <span class="meter-label">Grounding Confidence:</span>
+                      <div class="meter-bar-bg">
+                        <div class="meter-bar-fill" id="meter-fill" style="width: 95%;"></div>
+                      </div>
+                      <span class="meter-val" id="meter-val">95%</span>
+                    </div>
+                  </div>
+                  <div class="banner-right">
+                    <span class="citations-count-tag" id="citations-count-tag">3 Sources Cited</span>
+                  </div>
+                </div>
+
+                <!-- Answer Body (Markdown formatted) -->
+                <div class="answer-body markdown-rendered" id="answer-body"></div>
+
+                <!-- Citations Reference Tray -->
+                <div class="citations-tray" id="citations-tray">
+                  <h4>Referenced Source Groundings</h4>
+                  <div class="citations-list" id="citations-list"></div>
+                </div>
+
+                <!-- Anti-Hallucination Claim Audit Drawer -->
+                <details class="verification-drawer" id="verification-drawer">
+                  <summary>
+                    <span>Anti-Hallucination Claim Audit</span>
+                    <span class="claims-summary-badge" id="claims-summary-badge">4/4 Claims Grounded</span>
+                  </summary>
+                  <div class="claims-table-container">
+                    <table class="claims-table" id="claims-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Extracted Claim</th>
+                          <th>Cited Source</th>
+                          <th>Status</th>
+                          <th>Grounding Rationale</th>
+                        </tr>
+                      </thead>
+                      <tbody id="claims-table-body"></tbody>
+                    </table>
+                  </div>
+                </details>
+
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ==================== TAB 2: SOURCE CORPUS ==================== -->
+      <section class="tab-pane" id="tab-corpus" role="tabpanel" style="display: none;">
+        <div class="corpus-container">
+          <div class="corpus-header">
+            <div>
+              <h2>Indexed Source Documents</h2>
+              <p class="section-desc">Scientific dossiers, technical specifications, and research reports indexed into the hybrid BM25 and dense vector store.</p>
+            </div>
+            <div class="corpus-actions">
+              <button class="btn btn-secondary" id="btn-open-upload-modal">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <span>Upload New Document</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="documents-grid" id="documents-grid">
+            <!-- Dynamically populated document cards -->
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 3: BENCHMARK SUITE ==================== -->
+      <section class="tab-pane" id="tab-benchmark" role="tabpanel" style="display: none;">
+        <div class="benchmark-container">
+          <div class="benchmark-header">
+            <div>
+              <h2>Rooman AI Challenge Benchmark Suite</h2>
+              <p class="section-desc">Automated evaluation across 10 varied test cases assessing factual recall, comparative reasoning, multi-document synthesis, and strict unanswerable refusal handling.</p>
+            </div>
+            <div>
+              <button class="btn btn-primary" id="btn-run-all-benchmark">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+                <span>Execute 10-Case Benchmark</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Benchmark Metrics Overview Cards -->
+          <div class="metrics-row" id="benchmark-metrics-row" style="display: none;">
+            <div class="metric-card">
+              <span class="metric-title">Pass Rate</span>
+              <span class="metric-number" id="metric-pass-rate">100%</span>
+              <span class="metric-sub" id="metric-pass-sub">10 / 10 test cases</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-title">Avg Grounding Score</span>
+              <span class="metric-number" id="metric-grounding">96.4%</span>
+              <span class="metric-sub">Claim-level citation integrity</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-title">Citation Precision</span>
+              <span class="metric-number" id="metric-citation-validity">100%</span>
+              <span class="metric-sub">Valid target document citations</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-title">Unanswerable Refusal</span>
+              <span class="metric-number" id="metric-fallback-rate">100%</span>
+              <span class="metric-sub">Zero out-of-corpus hallucinations</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-title">Avg Latency</span>
+              <span class="metric-number" id="metric-avg-latency">42ms</span>
+              <span class="metric-sub">End-to-end agent cycle</span>
+            </div>
+          </div>
+
+          <!-- Benchmark Cases Table -->
+          <div class="card benchmark-card">
+            <div class="table-container">
+              <table class="benchmark-table" id="benchmark-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Category</th>
+                    <th>Question</th>
+                    <th>Expected Behavior</th>
+                    <th>Status</th>
+                    <th>Grounding</th>
+                    <th>Latency</th>
+                  </tr>
+                </thead>
+                <tbody id="benchmark-table-body">
+                  <!-- Dynamically populated test cases -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ==================== TAB 4: ARCHITECTURE & LOGIC ==================== -->
+      <section class="tab-pane" id="tab-architecture" role="tabpanel" style="display: none;">
+        <div class="architecture-container">
+          <div class="card arch-card">
+            <h2>Agentic Research Pipeline & Mathematical Foundations</h2>
+            <p class="arch-lead">VeriCite AI is engineered around strict epistemological grounding, preventing hallucination through five modular layers.</p>
+
+            <div class="arch-layers-grid">
+              <div class="arch-layer-box">
+                <div class="layer-num">01</div>
+                <h3>Query Decomposition</h3>
+                <p>Deconstructs complex research queries into up to 3 orthogonal search angles, resolving multi-hop references and comparative entities.</p>
+              </div>
+
+              <div class="arch-layer-box">
+                <div class="layer-num">02</div>
+                <h3>Hybrid RRF Retrieval</h3>
+                <p>Combines sparse BM25 token frequencies with dense normalized embeddings via Reciprocal Rank Fusion (RRF):</p>
+                <code>RRF(d) = &Sigma; (w_i / (k + rank_i(d)))</code>
+              </div>
+
+              <div class="arch-layer-box">
+                <div class="layer-num">03</div>
+                <h3>Relevance Guardrail</h3>
+                <p>Assesses the maximum similarity score against a threshold (&theta; = 0.18). Unanswerable and out-of-domain queries trigger immediate safe refusal.</p>
+              </div>
+
+              <div class="arch-layer-box">
+                <div class="layer-num">04</div>
+                <h3>Anchored Synthesis</h3>
+                <p>Constrains LLM generation to provided source blocks, enforcing granular sentence-level citation tags: <code>[^doc#c001]</code>.</p>
+              </div>
+
+              <div class="arch-layer-box">
+                <div class="layer-num">05</div>
+                <h3>Anti-Hallucination Audit</h3>
+                <p>Post-generation verification extracts all claims, measuring token recall and 3-gram continuous alignment against cited source passages.</p>
+              </div>
+            </div>
+
+            <div class="arch-details-section">
+              <h3>System Configuration</h3>
+              <div class="config-table-wrap">
+                <table class="config-table">
+                  <tbody>
+                    <tr><td><strong>Active LLM Provider</strong></td><td id="arch-llm-provider">Detecting...</td></tr>
+                    <tr><td><strong>Dense Vector Strategy</strong></td><td>Subword N-gram Cosine Vector Space / Gemini Embeddings</td></tr>
+                    <tr><td><strong>Sparse Lexical Engine</strong></td><td>BM25Okapi (k1=1.5, b=0.75)</td></tr>
+                    <tr><td><strong>Chunk Size & Overlap</strong></td><td>650 chars / 120 chars semantic overlap</td></tr>
+                    <tr><td><strong>Refusal Threshold</strong></td><td>Relevance Score &lt; 0.180</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Source Chunk Preview Modal / Drawer -->
+    <div class="modal-overlay" id="chunk-modal" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <span class="chunk-badge" id="modal-chunk-id">doc_id#c001</span>
+            <h3 id="modal-doc-title">Document Title</h3>
+            <span class="modal-section-subtitle" id="modal-section-name">Section Name</span>
+          </div>
+          <button class="modal-close-btn" id="modal-close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="quote-highlight-box" id="modal-quote-box">
+            <span class="box-label">Verified Excerpt Quote:</span>
+            <p id="modal-quote-text"></p>
+          </div>
+          <div class="full-chunk-text-box">
+            <span class="box-label">Full Context Passage:</span>
+            <pre id="modal-full-text"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload Document Modal -->
+    <div class="modal-overlay" id="upload-modal" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Upload Source Document</h3>
+          <button class="modal-close-btn" id="upload-modal-close-btn">&times;</button>
+        </div>
+        <form id="upload-form" class="modal-body">
+          <div class="form-group">
+            <label for="upload-file" class="form-label">Select File (PDF, Markdown, TXT, JSON)</label>
+            <input type="file" id="upload-file" name="file" class="form-input" accept=".pdf,.md,.txt,.json" required>
+          </div>
+          <div class="form-group">
+            <label for="upload-title" class="form-label">Document Title (Optional)</label>
+            <input type="text" id="upload-title" name="title" class="form-input" placeholder="e.g. Advanced Quantum Algorithms">
+          </div>
+          <div class="modal-footer">
+            <button type="submit" class="btn btn-primary" id="btn-confirm-upload">Upload & Index</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
