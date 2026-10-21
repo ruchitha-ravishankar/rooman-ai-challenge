@@ -1,6 +1,46 @@
+# Python & Virtual Environments
 .venv/
+venv/
+env/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 .pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Secrets & Environment Variables
 .env
+.env.*
+*.pem
+*.key
+*.token
+credentials.json
+
+# Local Databases, Logs & Artifacts
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/external/
 data/index/
+*.log
+logs/
+
+# Model Weights & Large Artifacts
+models/*.bin
+models/*.safetensors
+*.onnx
+
+# User Private Files & Academic Manuscripts
+manuscript/
+*.pdf
+*.docx
+*.docm
+
+# OS & Editor Artifacts
+.DS_Store
+.vscode/
+.idea/

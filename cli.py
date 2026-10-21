@@ -1,268 +1,260 @@
 #!/usr/bin/env python3
-"""
-VeriCite AI - Terminal CLI Interface & Benchmark Evaluation Runner
-Rooman AI Challenge Submission
+"""MCP Defense Lab — Command Line Interface & Evaluation Runner.
+
+Measuring MCP Defenses with a Real Agent in the Loop.
 """
 
-import sys
-import os
+from __future__ import annotations
+
 import argparse
-import time
-import json
+import sys
+import uuid
 from pathlib import Path
+
+# Ensure project root is in sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.markdown import Markdown
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.prompt import Prompt
 
-# Ensure root path in sys.path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from app.config import settings, DATA_DIR, SOURCES_DIR
-from app.models.research import ResearchRequest
-from app.retrieval.indexer import CorpusIndex
-from app.agent.engine import ResearchAgent
-from app.agent.llm_provider import LLMProvider
+from mcp_defense_lab.core.llm_provider import (
+    OllamaProvider,
+    ScriptedBehaviorMode,
+    ScriptedFakeModelProvider,
+)
+from mcp_defense_lab.db.repository import repo
+from mcp_defense_lab.defenses import DEFENSE_REGISTRY, get_defense, list_available_defenses
+from mcp_defense_lab.evaluation.benchmark import BenchmarkRunner
+from mcp_defense_lab.evaluation.datasets import generate_synthetic_benchmark
+from mcp_defense_lab.fuzzing.fuzzer import AdaptiveFuzzer
+from mcp_defense_lab.fuzzing.mutators import (
+    ArgumentPathObfuscator,
+    BenignContextWrapperMutator,
+    SynonymMutator,
+    UnicodeZeroWidthMutator,
+)
 
 console = Console()
 
 
-def print_banner():
-    banner_text = """
-[bold green]VeriCite AI[/bold green] — [bold white]Research Agent with Strict Citations[/bold white]
-[dim]Rooman AI Challenge | Hybrid BM25 & Dense RAG | Anti-Hallucination Guardrail[/dim]
-"""
-    console.print(Panel(banner_text.strip(), border_style="green", expand=False))
+def print_banner() -> None:
+    text = (
+        "[bold cyan]MCP Defense Lab[/bold cyan] — [bold white]Measuring MCP Defenses with a Real Agent in the Loop[/bold white]\n"
+        "[dim]Agent-Based Security Benchmark | Tool Poisoning Defenses | Bounded Adaptive Fuzzing[/dim]"
+    )
+    console.print(Panel(text.strip(), border_style="cyan", expand=False))
 
 
-def display_research_result(res):
-    """Prints a beautifully formatted research result using Rich."""
-    console.print()
-    
-    # Header info
-    header_table = Table.grid(padding=(0, 2))
-    header_table.add_column(style="bold cyan")
-    header_table.add_column()
-    
-    status_text = "[bold yellow]Insufficient Evidence (Refusal)[/bold yellow]" if res.is_fallback else "[bold green]Verified Grounded[/bold green]"
-    header_table.add_row("Status:", status_text)
-    header_table.add_row("Confidence:", f"{res.confidence * 100:.1f}%")
-    header_table.add_row("Execution Latency:", f"{res.total_time_ms:.1f}ms")
-    header_table.add_row("Sub-Queries:", " | ".join(res.sub_queries))
-    
-    console.print(Panel(header_table, title="[bold]Research Analysis Summary[/bold]", border_style="blue"))
-    
-    # Answer markdown
-    console.print()
-    console.print(Panel(Markdown(res.answer), title="[bold green]Synthesized Answer with Grounded Citations[/bold green]", border_style="green"))
-    
-    # Citations Table
-    if res.citations:
-        console.print()
-        cit_table = Table(title="Referenced Source Provenance", border_style="cyan")
-        cit_table.add_column("Marker", style="bold yellow", width=12)
-        cit_table.add_column("Document", style="bold white", width=26)
-        cit_table.add_column("Section / Page", style="dim", width=18)
-        cit_table.add_column("Score", justify="right", style="green", width=8)
-        cit_table.add_column("Supporting Excerpt Quote", style="italic")
-        
-        for cit in res.citations:
-            cit_table.add_row(
-                cit.citation_id,
-                cit.document_title[:25],
-                f"{cit.section[:16]}",
-                f"{cit.relevance_score * 100:.0f}%",
-                f'"{cit.quote[:100]}..."'
-            )
-        console.print(cit_table)
-    
-    # Anti-Hallucination Verification Audit
-    if res.verification_report and res.verification_report.total_claims > 0:
-        vr = res.verification_report
-        console.print()
-        claim_table = Table(
-            title=f"Anti-Hallucination Audit: {vr.verified_claims}/{vr.total_claims} Claims Grounded ({vr.grounding_score*100:.0f}%)",
-            border_style="magenta"
-        )
-        claim_table.add_column("#", width=4)
-        claim_table.add_column("Claim Statement", style="white")
-        claim_table.add_column("Citation", style="yellow", width=12)
-        claim_table.add_column("Grounding", width=12)
-        claim_table.add_column("Verification Rationale", style="dim")
-        
-        for cl in vr.claim_details:
-            status = "[bold green]VERIFIED[/bold green]" if cl.is_grounded else "[bold red]UNVERIFIED[/bold red]"
-            claim_table.add_row(
-                str(cl.claim_id),
-                cl.claim_text[:90] + ("..." if len(cl.claim_text) > 90 else ""),
-                cl.cited_marker or "None",
-                status,
-                cl.rationale
-            )
-        console.print(claim_table)
-
-
-def run_benchmark(agent: ResearchAgent):
-    """Executes the full 10-question evaluation benchmark suite in terminal."""
-    q_path = DATA_DIR / "questions.json"
-    if not q_path.exists():
-        console.print("[red]Error: data/questions.json not found.[/red]")
-        return
-
-    cases = json.loads(q_path.read_text(encoding="utf-8"))
-    console.print(f"\n[bold cyan]Starting Rooman AI Challenge Benchmark ({len(cases)} test cases)...[/bold cyan]\n")
-    
-    bench_table = Table(title="Rooman Benchmark Suite Results", border_style="cyan")
-    bench_table.add_column("ID", width=5)
-    bench_table.add_column("Category", width=16)
-    bench_table.add_column("Question", width=36)
-    bench_table.add_column("Status", width=10)
-    bench_table.add_column("Grounding", width=10, justify="right")
-    bench_table.add_column("Latency", width=10, justify="right")
-
-    passed_count = 0
-    total_time = 0.0
-    total_grounding = 0.0
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console
-    ) as progress:
-        task = progress.add_task("[green]Evaluating cases...", total=len(cases))
-
-        for c in cases:
-            q_id = c["id"]
-            cat = c["category"]
-            question = c["question"]
-            should_fallback = c.get("should_fallback", False)
-            expected_facts = c.get("expected_key_facts", [])
-
-            req = ResearchRequest(query=question, top_k=5, strict_citations=True)
-            res = agent.run(req)
-
-            # Evaluation metrics
-            fallback_ok = (res.is_fallback == should_fallback)
-            facts_found = sum(1 for f in expected_facts if f.lower() in res.answer.lower())
-            facts_cov = (facts_found / len(expected_facts)) if expected_facts else (1.0 if should_fallback else 0.0)
-            grounding = res.verification_report.grounding_score if res.verification_report else 1.0
-
-            if should_fallback:
-                passed = fallback_ok
-            else:
-                passed = (not res.is_fallback) and (grounding >= 0.50) and (facts_cov >= 0.30)
-
-            if passed:
-                passed_count += 1
-                status_str = "[bold green]PASS[/bold green]"
-            else:
-                status_str = "[bold red]FAIL[/bold red]"
-
-            total_time += res.total_time_ms
-            total_grounding += grounding
-
-            bench_table.add_row(
-                q_id,
-                cat,
-                question[:34] + ("..." if len(question) > 34 else ""),
-                status_str,
-                f"{grounding * 100:.0f}%",
-                f"{res.total_time_ms:.1f}ms"
-            )
-            progress.advance(task)
-
-    console.print(bench_table)
-    
-    # Summary panel
-    pass_pct = (passed_count / len(cases)) * 100
-    avg_latency = total_time / len(cases)
-    avg_grounding = (total_grounding / len(cases)) * 100
-
-    summary_text = f"""
-[bold]Total Test Cases:[/bold] {len(cases)}
-[bold]Passed:[/bold] {passed_count}/{len(cases)} ([bold green]{pass_pct:.1f}%[/bold green])
-[bold]Average Grounding Score:[/bold] {avg_grounding:.1f}%
-[bold]Average Latency:[/bold] {avg_latency:.1f}ms
-[bold]Unanswerable Guardrail:[/bold] 100% Correct Refusal on Out-of-Corpus Queries
-"""
-    console.print(Panel(summary_text.strip(), title="[bold green]Benchmark Summary[/bold green]", border_style="green"))
-
-
-def interactive_mode(agent: ResearchAgent):
-    """Runs interactive terminal REPL."""
+def cmd_health(args: argparse.Namespace) -> None:
     print_banner()
-    console.print("[dim]Type your research question, or 'benchmark' to run full evaluation suite, or 'exit' to quit.[/dim]\n")
+    ollama = OllamaProvider()
+    ollama_ok = ollama.is_available()
 
-    while True:
-        try:
-            query = Prompt.ask("[bold green]Research Question[/bold green]")
-            if not query.strip():
-                continue
-            if query.lower() in ["exit", "quit", "q"]:
-                console.print("[cyan]Exiting VeriCite AI. Goodbye![/cyan]")
-                break
-            if query.lower() == "benchmark":
-                run_benchmark(agent)
-                continue
+    table = Table(title="System & Component Health Check", border_style="cyan")
+    table.add_column("Component", style="bold")
+    table.add_column("Status")
+    table.add_column("Details")
 
-            with console.status("[bold green]Synthesizing and auditing citations...[/bold green]"):
-                req = ResearchRequest(query=query.strip(), top_k=5, strict_citations=True)
-                res = agent.run(req)
+    table.add_row("Database (SQLite)", "[green]READY[/green]", f"Path: {repo.db.db_path}")
+    table.add_row(
+        "Local LLM (Ollama)",
+        "[green]AVAILABLE[/green]" if ollama_ok else "[yellow]OFFLINE / RESTRICTED[/yellow]",
+        f"URL: {ollama._base_url} (Model: {ollama.model_name})",
+    )
+    table.add_row("Defenses Registered", f"[green]{len(DEFENSE_REGISTRY)} active[/green]", ", ".join(DEFENSE_REGISTRY.keys()))
+    cases = generate_synthetic_benchmark()
+    table.add_row("Synthetic Benchmark", f"[green]{len(cases)} cases[/green]", "20 Attacks (T1, T2, T3) + 20 Benign Tasks")
 
-            display_research_result(res)
-            console.print("\n" + "─" * 60 + "\n")
-
-        except KeyboardInterrupt:
-            console.print("\n[cyan]Session ended.[/cyan]")
-            break
-        except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+    console.print(table)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="VeriCite AI - Research Agent with Citations")
-    parser.add_argument("--query", "-q", type=str, help="Single research question to investigate")
-    parser.add_argument("--benchmark", "-b", action="store_true", help="Run full 10-question evaluation benchmark suite")
-    parser.add_argument("--list-docs", "-l", action="store_true", help="List all indexed corpus documents")
-    parser.add_argument("--top-k", "-k", type=int, default=5, help="Number of passages to retrieve (default: 5)")
-    args = parser.parse_args()
+def cmd_list_defenses(args: argparse.Namespace) -> None:
+    print_banner()
+    table = Table(title="Available Defense Strategies", border_style="cyan")
+    table.add_column("Defense Key", style="bold green")
+    table.add_column("Name")
+    table.add_column("Description")
 
-    # Initialize Index and Agent
-    index = CorpusIndex()
-    index.build_from_sources()
-    llm = LLMProvider()
-    agent = ResearchAgent(index=index, llm=llm)
+    for d in list_available_defenses():
+        table.add_row(d["id"], d["name"], d["description"])
 
-    if args.list_docs:
-        docs = index.list_documents()
-        t = Table(title=f"Indexed Corpus Documents ({len(docs)} total)", border_style="cyan")
-        t.add_column("Doc ID", style="bold yellow")
-        t.add_column("Title", style="bold white")
-        t.add_column("Format", style="dim")
-        t.add_column("Chunks", justify="right", style="green")
-        t.add_column("Words", justify="right")
-        for d in docs:
-            t.add_row(d["doc_id"], d["title"], d["source_type"], str(d["chunk_count"]), str(d["word_count"]))
-        console.print(t)
+    console.print(table)
+
+
+def cmd_run_experiment(args: argparse.Namespace) -> None:
+    print_banner()
+    defenses_to_run = list(DEFENSE_REGISTRY.keys()) if args.defense == "all" else [args.defense]
+
+    all_cases = generate_synthetic_benchmark()
+    selected_cases = all_cases[:args.cases]
+
+    # Model provider
+    if args.provider == "ollama":
+        provider = OllamaProvider(model_name=args.model)
+        if not provider.is_available():
+            console.print("[bold red]Error:[/bold red] Local Ollama server is offline or unreachable.")
+            sys.exit(1)
+        console.print(f"[bold green]Connected to live Ollama:[/bold green] model '{provider.model_name}'")
+    else:
+        mode_enum = ScriptedBehaviorMode(args.mode)
+        provider = ScriptedFakeModelProvider(mode=mode_enum, model_name=args.model or f"scripted-{args.mode}")
+        console.print(f"[bold cyan]Using Scripted Provider:[/bold cyan] mode='{args.mode}', model='{provider.model_name}'")
+
+    baseline_asr = None
+
+    # Run each defense
+    for d_name in defenses_to_run:
+        defense = get_defense(d_name)
+        runner = BenchmarkRunner(provider=provider, defense=defense)
+        exp_id = f"exp_{d_name[:6]}_{uuid.uuid4().hex[:6]}"
+
+        console.print(f"\n[bold yellow]>>> Running Evaluation for Defense: {d_name} ({len(selected_cases)} cases)...[/bold yellow]")
+        telemetry, report = runner.run_suite(selected_cases, experiment_id=exp_id, baseline_asr=baseline_asr)
+
+        # Store baseline ASR if this was the baseline run
+        if d_name == "no_defense_baseline":
+            baseline_asr = report.attack_success_rate.point_estimate
+
+        # Save to SQLite
+        clean_config = {
+            k: v for k, v in vars(args).items()
+            if k != "func" and isinstance(v, (str, int, float, bool, list, dict, type(None)))
+        }
+        repo.save_experiment(
+            experiment_id=exp_id,
+            title=f"CLI Evaluation: {d_name}",
+            defense_name=d_name,
+            model_provider=provider.model_type,
+            model_name=provider.model_name,
+            config=clean_config,
+            telemetry_records=telemetry,
+            report=report,
+        )
+
+        console.print(f"[green]✓ Experiment {exp_id} saved to database.[/green]")
+        console.print(f"  ASR: {report.attack_success_rate}")
+        console.print(f"  TCR: {report.benign_completion_rate}")
+        console.print(f"  FPR: {report.false_positive_rate}")
+        console.print(f"  Defense Block Rate: {report.defense_block_rate}")
+        console.print(f"  Median Latency: Total={report.median_total_latency_ms}ms | Defense={report.median_defense_latency_ms}ms")
+        if report.relative_asr_reduction is not None:
+            console.print(f"  Relative ASR Reduction vs Baseline: [bold green]{report.relative_asr_reduction:.1%}[/bold green]")
+
+
+def cmd_run_fuzz(args: argparse.Namespace) -> None:
+    print_banner()
+    defense = get_defense(args.defense)
+    provider = ScriptedFakeModelProvider(mode=ScriptedBehaviorMode.NAIVE_COMPLIANT)
+    cases = generate_synthetic_benchmark()[:args.cases]
+
+    console.print(f"[bold yellow]>>> Running Bounded Adaptive Fuzzing on '{args.defense}'...[/bold yellow]")
+    console.print(f"    Cases: {len(cases)} | Max Mutations: {args.mutations} | Seed: {args.seed}")
+
+    fuzzer = AdaptiveFuzzer(
+        mutators=[
+            SynonymMutator(),
+            UnicodeZeroWidthMutator(),
+            BenignContextWrapperMutator(),
+            ArgumentPathObfuscator(),
+        ],
+        seed=args.seed,
+        max_mutations_per_case=args.mutations,
+    )
+
+    fuzz_id = f"fuzz_{uuid.uuid4().hex[:8]}"
+    result = fuzzer.run_fuzz_evaluation(defense=defense, provider=provider, baseline_cases=cases, fuzz_run_id=fuzz_id)
+    repo.save_fuzz_run(result)
+
+    console.print(f"\n[bold green]✓ Fuzz Run '{fuzz_id}' Complete & Persisted.[/bold green]")
+    table = Table(title="Adaptive Fuzzing Evasion Results", border_style="cyan")
+    table.add_column("Metric", style="bold")
+    table.add_column("Pre-Fuzz")
+    table.add_column("Post-Fuzz")
+    table.add_column("Evasion Delta", style="bold yellow")
+
+    table.add_row("Attack Success Rate (ASR)", f"{result.pre_fuzz_report.attack_success_rate.point_estimate:.1%}", f"{result.post_fuzz_report.attack_success_rate.point_estimate:.1%}", f"{result.delta_asr:+.1%}")
+    table.add_row("Benign Completion (TCR)", f"{result.pre_fuzz_report.benign_completion_rate.point_estimate:.1%}", f"{result.post_fuzz_report.benign_completion_rate.point_estimate:.1%}", f"{result.delta_tcr:+.1%}")
+    table.add_row("False Positive Rate (FPR)", f"{result.pre_fuzz_report.false_positive_rate.point_estimate:.1%}", f"{result.post_fuzz_report.false_positive_rate.point_estimate:.1%}", f"{result.delta_fpr:+.1%}")
+
+    console.print(table)
+    console.print(f"[dim]{result.evasion_summary}[/dim]")
+
+
+def cmd_show_results(args: argparse.Namespace) -> None:
+    print_banner()
+    exps = repo.list_experiments()
+    if not exps:
+        console.print("[yellow]No experiments recorded in SQLite database. Run 'python cli.py run-experiment' first.[/yellow]")
         return
 
-    if args.benchmark:
-        print_banner()
-        run_benchmark(agent)
-        return
+    table = Table(title="Persisted Evaluation Experiments", border_style="cyan")
+    table.add_column("Experiment ID", style="bold")
+    table.add_column("Defense")
+    table.add_column("Model Provider")
+    table.add_column("Cases")
+    table.add_column("ASR (Wilson 95% CI)", style="bold red")
+    table.add_column("TCR (Benign)", style="bold green")
+    table.add_column("FPR")
+    table.add_column("Med Lat (ms)")
 
-    if args.query:
-        print_banner()
-        with console.status("[bold green]Synthesizing and auditing citations...[/bold green]"):
-            req = ResearchRequest(query=args.query, top_k=args.top_k, strict_citations=True)
-            res = agent.run(req)
-        display_research_result(res)
-        return
+    for e in exps:
+        asr_str = f"{e['asr']:.1%} [{e['asr_lower']:.1%}–{e['asr_upper']:.1%}]" if e['asr'] is not None else "N/A"
+        tcr_str = f"{e['tcr']:.1%}" if e['tcr'] is not None else "N/A"
+        fpr_str = f"{e['fpr']:.1%}" if e['fpr'] is not None else "N/A"
+        med_lat = f"{e['median_latency_ms']:.1f}" if e['median_latency_ms'] is not None else "N/A"
+        table.add_row(
+            e["id"],
+            e["defense_name"],
+            e["model_provider"],
+            str(e["total_cases"]),
+            asr_str,
+            tcr_str,
+            fpr_str,
+            med_lat,
+        )
 
-    # Default: Interactive REPL
-    interactive_mode(agent)
+    console.print(table)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="MCP Defense Lab — Measuring MCP Defenses with a Real Agent in the Loop",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # health
+    p_health = subparsers.add_parser("health", help="Check system and component health")
+    p_health.set_defaults(func=cmd_health)
+
+    # list-defenses
+    p_defenses = subparsers.add_parser("list-defenses", help="List all implemented defense strategies")
+    p_defenses.set_defaults(func=cmd_list_defenses)
+
+    # run-experiment
+    p_exp = subparsers.add_parser("run-experiment", help="Run benchmark evaluation across defenses")
+    p_exp.add_argument("--defense", default="intent_alignment_defense", help="Defense name or 'all'")
+    p_exp.add_argument("--provider", default="scripted", choices=["scripted", "ollama"], help="Model provider")
+    p_exp.add_argument("--model", default=None, help="Model identifier")
+    p_exp.add_argument("--mode", default="naive_compliant", choices=["naive_compliant", "benign_optimal", "honest_refusing", "malformed_output"], help="Scripted provider behavior mode")
+    p_exp.add_argument("--cases", type=int, default=40, help="Number of benchmark cases to evaluate")
+    p_exp.add_argument("--seed", type=int, default=42, help="Deterministic random seed")
+    p_exp.set_defaults(func=cmd_run_experiment)
+
+    # run-fuzz
+    p_fuzz = subparsers.add_parser("run-fuzz", help="Run bounded adaptive fuzzing evaluation")
+    p_fuzz.add_argument("--defense", default="intent_alignment_defense", help="Defense to fuzz")
+    p_fuzz.add_argument("--mutations", type=int, default=2, help="Max mutations per case")
+    p_fuzz.add_argument("--cases", type=int, default=20, help="Sample count")
+    p_fuzz.add_argument("--seed", type=int, default=42, help="Random seed")
+    p_fuzz.set_defaults(func=cmd_run_fuzz)
+
+    # show-results
+    p_results = subparsers.add_parser("show-results", help="Display saved benchmark results from SQLite")
+    p_results.set_defaults(func=cmd_show_results)
+
+    parsed = parser.parse_args()
+    parsed.func(parsed)
 
 
 if __name__ == "__main__":
